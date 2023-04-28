@@ -1,6 +1,6 @@
 {
   "name": "@zwave-js/flash",
-  "version": "10.13.0",
+  "version": "10.16.0",
   "description": "zwave-js: firmware flash utility",
   "keywords": [],
   "publishConfig": {
@@ -38,7 +38,7 @@
     "zwave-js": "workspace:*"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json",
+    "build": "tsc -b tsconfig.build.json --pretty",
     "clean": "del-cli build/ \"*.tsbuildinfo\"",
     "lint:ts": "eslint --ext .ts --rule \"prettier/prettier: off\" \"src/**/*.ts\"",
     "lint:ts:fix": "yarn run lint:ts --fix",

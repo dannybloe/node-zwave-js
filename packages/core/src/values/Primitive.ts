@@ -1,4 +1,4 @@
-import { NUM_NODEMASK_BYTES } from "../consts";
+import { MAX_NODES, NUM_NODEMASK_BYTES } from "../consts";
 import { ZWaveError, ZWaveErrorCodes } from "../error/ZWaveError";
 import {
 	getBitMaskWidth,
@@ -204,7 +204,7 @@ export function parseBitMask(mask: Buffer, startValue: number = 1): number[] {
 /** Serializes a numeric array with a given maximum into a bit mask */
 export function encodeBitMask(
 	values: readonly number[],
-	maxValue: number,
+	maxValue: number = Math.max(...values),
 	startValue: number = 1,
 ): Buffer {
 	const numBytes = Math.ceil((maxValue - startValue + 1) / 8);
@@ -223,7 +223,7 @@ export function parseNodeBitMask(mask: Buffer): number[] {
 }
 
 export function encodeNodeBitMask(nodeIDs: readonly number[]): Buffer {
-	return encodeBitMask(nodeIDs, NUM_NODEMASK_BYTES);
+	return encodeBitMask(nodeIDs, MAX_NODES);
 }
 
 /**

@@ -4,6 +4,70 @@
 <!--
 	Add placeholder for next release with `wip` snippet
 -->
+## 10.16.0 (2023-04-25)
+### Features
+* Implement `pollValue` for `Notification CC` (for pull-mode nodes) (#5676)
+* Add support for `Energy Production CC` (#5677)
+* Add support for `Window Covering CC` (#5679, #5687)
+
+### Bugfixes
+* When a command is too large for explorer frames, and Transport Service CC is not supported, the driver will now attempt to send the command without using explorer frames, instead of failing immediately (#5662)
+* Ensure devices don't report duplicate firmware targets (#5670)
+* Always write metadata for `Meter CC` reports and add `ccSpecific` info (#5675)
+* Sending raw, non-implemented CCs no longer throws while attempting to determine the version (#5674)
+* RSSI background measurements are now also scheduled in networks without always-listening nodes (#5681)
+* Possibly matching partial responses to a command now refresh the timeout (#5683)
+* Logging to file and logging to the console at the same time is now possible (#5696)
+* Fixed some spec-compliance issues related to NIF, Security S2 and Version CC (#5697, #5704, #5706)
+* Respond to queries for the commands supported via S0 (#5701)
+* When receiving an S2 encapsulated singlecast command with the sender's entropy, decryption is now only attempted once (#5699)
+* Fixed a crash that could happen when receiving a secure command before the controller was interviewed on startup (#5698)
+
+### Config file changes
+* Correct link to manual for Aeotec ZWA011 (#5657)
+* Disable Supervision CC for Homeseer HS-FLS100 (#5663)
+* Add Swidget Z-Wave inserts (#5498)
+* Add non-pro variant of the RaZberry 7 (#5673)
+* Define config parameters for Zipato ZD2301EU-5 (#5559)
+* Add alarm mappings to Weiser GED1455 SmartCode 5 (#5667)
+* Add kVar and kVarh to Aeotec Home Energy Meter Gen 5 (#5589)
+* Add config file for Shenzhen Neo PIR Motion, Temperature & Light Sensor (#5582)
+* Re-enable Supervision on Zooz ZSE29 FW2.2+ (#5671)
+* Add Inovelli VZW31-SN (#5629)
+
+### Changes under the hood
+* Refactored some integration tests (#5655, #5659)
+* The build process uses TypeScript project references again (#5658, #5685)
+
+## 10.15.0 (2023-04-12)
+### Features
+* Simplify working with mixed-security multicast (#5593)
+* Added an overload to `Node.manuallyIdleNotificationValue` which accepts a value ID (#5645)
+
+### Bugfixes
+* Mark sleeping nodes as asleep if querying node info fails (#5648)
+* Idle "Keypad state" notifications on keypad events (#5647)
+
+### Config file changes
+* Mention necessity for re-inclusion after changing endpoint-related config params for Qubino ZMNHAD Relay (#5640)
+
+## 10.14.1 (2023-04-07)
+### Bugfixes
+* Revert change to notification auto-idle from v10.14.0 (#5639)
+
+## 10.14.0 (2023-04-05)
+### Features
+* Added a method on the `ZWaveNode` class to manually idle notifications, e.g. a stuck smoke sensor (#5634)
+
+### Bugfixes
+* Fixed an issue where firmware updates would not start using Security S2 because of the delays caused by delivery verification (#5635)
+* Map "Low Battery" alarms from Yale and Kwikset locks to the "Battery level status", not the "Battery maintenance status" notification variable (#5632)
+* `Battery CC Reports` are now used to idle the "Battery level status" notification variable (#5633)
+* ~~To better align with the specifications, v1 to v7 notification variables are no longer auto-idled~~ (#5634)
+
+### Config file changes
+* Add ZVIDAR Z-CM-V01 (#5612)
+
 ## 10.13.0 (2023-04-04)
 ### Features
 * Added convenience method to set time, date and timezone on nodes (#5584)

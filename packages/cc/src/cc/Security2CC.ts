@@ -33,7 +33,12 @@ import {
 	NODE_ID_BROADCAST,
 } from "@zwave-js/core/safe";
 import type { ZWaveApplicationHost, ZWaveHost } from "@zwave-js/host/safe";
-import { buffer2hex, getEnumMemberName, pick } from "@zwave-js/shared/safe";
+import {
+	buffer2hex,
+	getEnumMemberName,
+	num2hex,
+	pick,
+} from "@zwave-js/shared/safe";
 import { wait } from "alcalzone-shared/async";
 import { CCAPI } from "../lib/API";
 import {
@@ -51,6 +56,7 @@ import {
 	implementedVersion,
 } from "../lib/CommandClassDecorators";
 import {
+	isValidExtension,
 	MGRPExtension,
 	MOSExtension,
 	MPANExtension,
@@ -101,7 +107,9 @@ function validateSequenceNumber(
 	this: Security2CC,
 	sequenceNumber: number,
 ): number | undefined {
-	validatePayload.withReason("Duplicate command")(
+	validatePayload.withReason(
+		`Duplicate command (sequence number ${sequenceNumber})`,
+	)(
 		!this.host.securityManager2!.isDuplicateSinglecast(
 			this.nodeId as number,
 			sequenceNumber,
@@ -333,6 +341,22 @@ export class Security2CCAPI extends CCAPI {
 				},
 			);
 		return response?.supportedCCs;
+	}
+
+	public async reportSupportedCommands(
+		supportedCCs: CommandClasses[],
+	): Promise<void> {
+		this.assertSupportsCommand(
+			Security2Command,
+			Security2Command.CommandsSupportedReport,
+		);
+
+		const cc = new Security2CCCommandsSupportedReport(this.applHost, {
+			nodeId: this.endpoint.nodeId,
+			endpoint: this.endpoint.index,
+			supportedCCs,
+		});
+		await this.applHost.sendCommand(cc, this.commandOptions);
 	}
 
 	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
@@ -722,6 +746,7 @@ export class Security2CC extends CommandClass {
 			securityClass?: SecurityClass;
 			multicastOutOfSync?: boolean;
 			multicastGroupId?: number;
+			verifyDelivery?: boolean;
 		},
 	): Security2CCMessageEncapsulation {
 		// Determine which extensions must be used on the command
@@ -744,6 +769,7 @@ export class Security2CC extends CommandClass {
 			encapsulated: cc,
 			securityClass: options?.securityClass,
 			extensions,
+			verifyDelivery: options?.verifyDelivery,
 		});
 
 		// Copy the encapsulation flags from the encapsulated command
@@ -760,6 +786,7 @@ interface Security2CCMessageEncapsulationOptions extends CCCommandOptions {
 	securityClass?: SecurityClass;
 	extensions?: Security2Extension[];
 	encapsulated?: CommandClass;
+	verifyDelivery?: boolean;
 }
 
 // An S2 encapsulated command may result in a NonceReport to be sent by the node if it couldn't decrypt the message
@@ -856,6 +883,13 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 					const ext = Security2Extension.from(
 						buffer.slice(offset, offset + extensionLength),
 					);
+					if (!isValidExtension(ext)) {
+						validatePayload.fail(
+							`Unknown S2 extension ${num2hex(
+								ext.type,
+							)} with critical flag`,
+						);
+					}
 					this.extensions.push(ext);
 					offset += extensionLength;
 					// Check if that was the last extension
@@ -900,7 +934,7 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 					this._sequenceNumber,
 				);
 
-				// When a node removes a singlecast message after a multicast group was marked out of sync,
+				// When a node receives a singlecast message after a multicast group was marked out of sync,
 				// it must forget about the group.
 				if (ctx.groupId == undefined) {
 					this.host.securityManager2.resetOutOfSyncMPANs(
@@ -986,6 +1020,8 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 			for (let i = 0; i < DECRYPT_ATTEMPTS; i++) {
 				({ plaintext, authOK, key, iv } = decrypt());
 				if (!!authOK && !!plaintext) break;
+				// No need to try further SPANs if we just got the sender's EI
+				if (!!this.getSenderEI()) break;
 			}
 
 			// If authentication fails, do so with an error code that instructs the
@@ -1046,6 +1082,8 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 				options.encapsulated.encapsulatingCC = this as any;
 			}
 
+			this.verifyDelivery = options.verifyDelivery !== false;
+
 			this.extensions = options.extensions ?? [];
 			if (
 				typeof this.nodeId !== "number" &&
@@ -1067,6 +1105,8 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 	private authData?: Buffer;
 	private authTag?: Buffer;
 	private ciphertext?: Buffer;
+
+	public readonly verifyDelivery: boolean = true;
 
 	private _sequenceNumber: number | undefined;
 	/**
@@ -1101,19 +1141,27 @@ export class Security2CCMessageEncapsulation extends Security2CC {
 	private getDestinationIDTX(): number {
 		if (this.isSinglecast()) return this.nodeId;
 
-		const mgrpExtension = this.extensions.find(
-			(e): e is MGRPExtension => e instanceof MGRPExtension,
-		);
-		if (mgrpExtension) return mgrpExtension.groupId;
-
-		throw new ZWaveError(
-			"Multicast Security S2 encapsulation requires the MGRP extension",
-			ZWaveErrorCodes.Security2CC_MissingExtension,
-		);
+		const ret = this.getMulticastGroupId();
+		if (ret == undefined) {
+			throw new ZWaveError(
+				"Multicast Security S2 encapsulation requires the MGRP extension",
+				ZWaveErrorCodes.Security2CC_MissingExtension,
+			);
+		}
+		return ret;
 	}
 
 	private getDestinationIDRX(): number {
-		return this.getMulticastGroupId() ?? this.host.ownNodeId;
+		if (this.isSinglecast()) return this.host.ownNodeId;
+
+		const ret = this.getMulticastGroupId();
+		if (ret == undefined) {
+			throw new ZWaveError(
+				"Multicast Security S2 encapsulation requires the MGRP extension",
+				ZWaveErrorCodes.Security2CC_MissingExtension,
+			);
+		}
+		return ret;
 	}
 
 	private getMGRPExtension(): MGRPExtension | undefined {

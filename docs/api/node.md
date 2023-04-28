@@ -592,6 +592,21 @@ The following CCs will be used (when supported or necessary) in this process:
 -   Time CC
 -   Schedule Entry Lock CC (for setting the timezone)
 
+### `manuallyIdleNotificationValue`
+
+```ts
+manuallyIdleNotificationValue(valueId: ValueID): void;
+manuallyIdleNotificationValue(notificationType: number, prevValue: number, endpointIndex?: number): void;
+```
+
+Many devices using `Notification CC` do not idle their notification values, since this requirement was only introduced in v8 of the Command Class. To alleviate the problem, this method can be used to manually idle the value. The method has two signatures; it takes either the `valueId` of the value to idle or the following arguments:
+
+-   `notificationType`: The standardized notification type the value belongs to. If unknown, this can be read from the `ccSpecific.notificationType` property of the corresponding value metadata.
+-   `prevValue`: The value of the notification variable in its non-idle state. This is used to determine which notification variable should be reset to idle. It **must** match the current value, otherwise the value will not be reset.
+-   `endpointIndex`: The (optional) index of the endpoint the notification value belongs to. If omitted, the root endpoint is assumed.
+
+> [!NOTE] This method will only do something if the node supports `Notification CC`, and the selected notification variable has an idle state.
+
 ## ZWaveNode properties
 
 ### `id`
@@ -661,28 +676,25 @@ This property tracks the current status of the node interview. It contains a val
 ```ts
 enum InterviewStage {
 	/** The interview process hasn't started for this node */
-	None,
+	None = 0,
 	/** The node's protocol information has been queried from the controller */
-	ProtocolInfo,
+	ProtocolInfo = 1,
 	/** The node has been queried for supported and controlled command classes */
-	NodeInfo,
-
+	NodeInfo = 2,
 	/**
 	 * Information for all command classes has been queried.
 	 * This includes static information that is requested once as well as dynamic
 	 * information that is requested on every restart.
 	 */
-	CommandClasses,
-
+	CommandClasses = 3,
 	/**
 	 * Device information for the node has been loaded from a config file.
 	 * If defined, some of the reported information will be overwritten based on the
 	 * config file contents.
 	 */
-	OverwriteConfig,
-
+	OverwriteConfig = 4,
 	/** The interview process has finished */
-	Complete,
+	Complete = 5,
 }
 ```
 
@@ -765,8 +777,8 @@ If the `Z-Wave+` Command Class is supported, this returns the `Z-Wave+` node typ
 
 ```ts
 enum ZWavePlusNodeType {
-	Node = 0x00, // ZWave+ Node
-	IPGateway = 0x02, // ZWave+ for IP Gateway
+	Node = 0,
+	IPGateway = 2,
 }
 ```
 
@@ -1248,9 +1260,9 @@ with
 
 ```ts
 enum PowerlevelTestStatus {
-	Failed = 0x00,
-	Success = 0x01,
-	"In Progress" = 0x02,
+	Failed = 0,
+	Success = 1,
+	"In Progress" = 2,
 }
 ```
 

@@ -75,14 +75,20 @@ import {
 import { PowerlevelCCTestNodeReport } from "@zwave-js/cc/PowerlevelCC";
 import { SceneActivationCCSet } from "@zwave-js/cc/SceneActivationCC";
 import {
+	Security2CCCommandsSupportedGet,
 	Security2CCNonceGet,
 	Security2CCNonceReport,
 } from "@zwave-js/cc/Security2CC";
 import {
+	SecurityCCCommandsSupportedGet,
 	SecurityCCNonceGet,
 	SecurityCCNonceReport,
 } from "@zwave-js/cc/SecurityCC";
-import { VersionCCValues } from "@zwave-js/cc/VersionCC";
+import {
+	VersionCCCommandClassGet,
+	VersionCCGet,
+	VersionCCValues,
+} from "@zwave-js/cc/VersionCC";
 import {
 	WakeUpCCValues,
 	WakeUpCCWakeUpNotification,
@@ -144,6 +150,7 @@ import {
 	ValueUpdatedArgs,
 	ZWaveError,
 	ZWaveErrorCodes,
+	ZWaveLibraryTypes,
 } from "@zwave-js/core";
 import type { NodeSchedulePollOptions } from "@zwave-js/host";
 import type { Message } from "@zwave-js/serial";
@@ -171,6 +178,7 @@ import { isArray, isObject } from "alcalzone-shared/typeguards";
 import { randomBytes } from "crypto";
 import { EventEmitter } from "events";
 import { isDeepStrictEqual } from "util";
+import { determineNIF } from "../controller/NodeInformationFrame";
 import type { Driver } from "../driver/Driver";
 import { cacheKeys } from "../driver/NetworkCache";
 import { Extended, interpretEx } from "../driver/StateMachineShared";
@@ -1689,35 +1697,61 @@ protocol version:      ${this.protocolVersion}`;
 			return;
 		}
 
-		this.driver.controllerLog.logNode(this.id, {
-			message: "querying node info...",
-			direction: "outbound",
-		});
-		try {
-			const nodeInfo = await this.requestNodeInfo();
-			const logLines: string[] = ["node info received", "supported CCs:"];
-			for (const cc of nodeInfo.supportedCCs) {
-				const ccName = CommandClasses[cc];
-				logLines.push(`· ${ccName ? ccName : num2hex(cc)}`);
-			}
+		// If we incorrectly assumed a sleeping node to be awake, this step will fail.
+		// In order to fail the interview, we retry here
+		for (let attempts = 1; attempts <= 2; attempts++) {
 			this.driver.controllerLog.logNode(this.id, {
-				message: logLines.join("\n"),
-				direction: "inbound",
+				message: "querying node info...",
+				direction: "outbound",
 			});
-			this.updateNodeInfo(nodeInfo);
-		} catch (e) {
-			if (
-				isZWaveError(e) &&
-				(e.code === ZWaveErrorCodes.Controller_ResponseNOK ||
-					e.code === ZWaveErrorCodes.Controller_CallbackNOK)
-			) {
-				this.driver.controllerLog.logNode(
-					this.id,
-					`Querying the node info failed`,
-					"error",
-				);
+			try {
+				const nodeInfo = await this.requestNodeInfo();
+				const logLines: string[] = [
+					"node info received",
+					"supported CCs:",
+				];
+				for (const cc of nodeInfo.supportedCCs) {
+					const ccName = CommandClasses[cc];
+					logLines.push(`· ${ccName ? ccName : num2hex(cc)}`);
+				}
+				this.driver.controllerLog.logNode(this.id, {
+					message: logLines.join("\n"),
+					direction: "inbound",
+				});
+				this.updateNodeInfo(nodeInfo);
+				break;
+			} catch (e) {
+				if (isZWaveError(e)) {
+					if (
+						attempts === 1 &&
+						this.canSleep &&
+						this.status !== NodeStatus.Asleep &&
+						e.code === ZWaveErrorCodes.Controller_CallbackNOK
+					) {
+						this.driver.controllerLog.logNode(
+							this.id,
+							`Querying the node info failed, the node is probably asleep. Retrying after wakeup...`,
+							"error",
+						);
+						// We assumed the node to be awake, but it is not.
+						this.markAsAsleep();
+						// Retry the query when the node wakes up
+						continue;
+					}
+
+					if (
+						e.code === ZWaveErrorCodes.Controller_ResponseNOK ||
+						e.code === ZWaveErrorCodes.Controller_CallbackNOK
+					) {
+						this.driver.controllerLog.logNode(
+							this.id,
+							`Querying the node info failed`,
+							"error",
+						);
+					}
+					throw e;
+				}
 			}
-			throw e;
 		}
 
 		this.setInterviewStage(InterviewStage.NodeInfo);
@@ -2604,6 +2638,11 @@ protocol version:      ${this.protocolVersion}`;
 			}
 		}
 
+		// If we're being queried by another node, treat this as a sign that the other node is awake
+		if (command.constructor.name.endsWith("Get")) {
+			this.markAsAwake();
+		}
+
 		if (command instanceof BasicCC) {
 			return this.handleBasicCommand(command);
 		} else if (command instanceof MultilevelSwitchCC) {
@@ -2620,10 +2659,14 @@ protocol version:      ${this.protocolVersion}`;
 			return this.handleSecurityNonceGet();
 		} else if (command instanceof SecurityCCNonceReport) {
 			return this.handleSecurityNonceReport(command);
+		} else if (command instanceof SecurityCCCommandsSupportedGet) {
+			return this.handleSecurityCommandsSupportedGet(command);
 		} else if (command instanceof Security2CCNonceGet) {
 			return this.handleSecurity2NonceGet();
 		} else if (command instanceof Security2CCNonceReport) {
 			return this.handleSecurity2NonceReport(command);
+		} else if (command instanceof Security2CCCommandsSupportedGet) {
+			return this.handleSecurity2CommandsSupportedGet(command);
 		} else if (command instanceof HailCC) {
 			return this.handleHail(command);
 		} else if (command instanceof FirmwareUpdateMetaDataCCGet) {
@@ -2640,6 +2683,10 @@ protocol version:      ${this.protocolVersion}`;
 			return this.handleTimeOffsetGet(command);
 		} else if (command instanceof ZWavePlusCCGet) {
 			return this.handleZWavePlusGet(command);
+		} else if (command instanceof VersionCCGet) {
+			return this.handleVersionGet(command);
+		} else if (command instanceof VersionCCCommandClassGet) {
+			return this.handleVersionCommandClassGet(command);
 		} else if (command instanceof InclusionControllerCCInitiate) {
 			// Inclusion controller commands are handled by the controller class
 			if (
@@ -3288,9 +3335,6 @@ protocol version:      ${this.protocolVersion}`;
 	}
 
 	private async handleZWavePlusGet(command: ZWavePlusCCGet): Promise<void> {
-		// treat this as a sign that the node is awake
-		this.markAsAwake();
-
 		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
 
 		await endpoint.commandClasses["Z-Wave Plus Info"]
@@ -3305,6 +3349,63 @@ protocol version:      ${this.protocolVersion}`;
 				installerIcon: 0x0500, // Generic Gateway
 				userIcon: 0x0500, // Generic Gateway
 			});
+	}
+
+	private async handleVersionGet(command: VersionCCGet): Promise<void> {
+		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
+
+		await endpoint.commandClasses.Version.withOptions({
+			// Answer with the same encapsulation as asked
+			encapsulationFlags: command.encapsulationFlags,
+		}).sendReport({
+			libraryType: ZWaveLibraryTypes["Static Controller"],
+			protocolVersion: this.driver.controller.protocolVersion!,
+			firmwareVersions: [this.driver.controller.firmwareVersion!],
+		});
+	}
+
+	private async handleVersionCommandClassGet(
+		command: VersionCCCommandClassGet,
+	): Promise<void> {
+		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
+
+		await endpoint.commandClasses.Version.withOptions({
+			// Answer with the same encapsulation as asked
+			encapsulationFlags: command.encapsulationFlags,
+		}).reportCCVersion(command.requestedCC);
+	}
+
+	private async handleSecurityCommandsSupportedGet(
+		command: SecurityCCCommandsSupportedGet,
+	): Promise<void> {
+		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
+
+		if (this.getHighestSecurityClass() === SecurityClass.S0_Legacy) {
+			const { supportedCCs } = determineNIF();
+			await endpoint.commandClasses.Security.reportSupportedCommands(
+				supportedCCs,
+				// The list of controlled CCs is long. We would need to split this
+				// into multiple reports.
+				// FIXME: Do that
+				[],
+			);
+		} else {
+			// S0 is not the highest class. Return an empty list
+			await endpoint.commandClasses.Security.reportSupportedCommands(
+				[],
+				[],
+			);
+		}
+	}
+
+	private async handleSecurity2CommandsSupportedGet(
+		command: Security2CCCommandsSupportedGet,
+	): Promise<void> {
+		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
+
+		await endpoint.commandClasses["Security 2"].reportSupportedCommands(
+			determineNIF().supportedCCs,
+		);
 	}
 
 	/**
@@ -3334,6 +3435,111 @@ protocol version:      ${this.protocolVersion}`;
 		}
 	}
 
+	// Fallback for V2 notifications that don't allow us to predefine the metadata during the interview.
+	// Instead of defining useless values for each possible notification event, we build the metadata on demand
+	private extendNotificationValueMetadata(
+		valueId: ValueID,
+		notificationConfig: Notification,
+		valueConfig: NotificationValueDefinition & { type: "state" },
+	) {
+		const ccVersion = this.driver.getSupportedCCVersionForEndpoint(
+			CommandClasses.Notification,
+			this.nodeId,
+			this.index,
+		);
+		if (ccVersion === 2 || !this.valueDB.hasMetadata(valueId)) {
+			const metadata = getNotificationValueMetadata(
+				this.valueDB.getMetadata(valueId) as
+					| ValueMetadataNumeric
+					| undefined,
+				notificationConfig,
+				valueConfig,
+			);
+			this.valueDB.setMetadata(valueId, metadata);
+		}
+	}
+
+	/**
+	 * Manually resets a single notification value to idle.
+	 */
+	public manuallyIdleNotificationValue(valueId: ValueID): void;
+
+	public manuallyIdleNotificationValue(
+		notificationType: number,
+		prevValue: number,
+		endpointIndex?: number,
+	): void;
+
+	public manuallyIdleNotificationValue(
+		notificationTypeOrValueID: number | ValueID,
+		prevValue?: number,
+		endpointIndex: number = 0,
+	): void {
+		let notificationType: number | undefined;
+		if (typeof notificationTypeOrValueID === "number") {
+			notificationType = notificationTypeOrValueID;
+		} else {
+			notificationType = this.valueDB.getMetadata(
+				notificationTypeOrValueID,
+			)?.ccSpecific?.notificationType as number | undefined;
+			if (notificationType === undefined) {
+				return;
+			}
+			prevValue = this.valueDB.getValue(notificationTypeOrValueID);
+			endpointIndex = notificationTypeOrValueID.endpoint ?? 0;
+		}
+
+		if (
+			!this.getEndpoint(endpointIndex)?.supportsCC(
+				CommandClasses.Notification,
+			)
+		) {
+			return;
+		}
+
+		const notificationConfig =
+			this.driver.configManager.lookupNotification(notificationType);
+		if (!notificationConfig) return;
+
+		return this.manuallyIdleNotificationValueInternal(
+			notificationConfig,
+			prevValue!,
+			endpointIndex,
+		);
+	}
+
+	/** Manually resets a single notification value to idle */
+	private manuallyIdleNotificationValueInternal(
+		notificationConfig: Notification,
+		prevValue: number,
+		endpointIndex: number,
+	): void {
+		const valueConfig = notificationConfig.lookupValue(prevValue);
+		// Only known variables may be reset to idle
+		if (!valueConfig || valueConfig.type !== "state") return;
+		// Some properties may not be reset to idle
+		if (!valueConfig.idle) return;
+
+		const notificationName = notificationConfig.name;
+		const variableName = valueConfig.variableName;
+		const valueId = NotificationCCValues.notificationVariable(
+			notificationName,
+			variableName,
+		).endpoint(endpointIndex);
+
+		// Make sure the value is actually set to the previous value
+		if (this.valueDB.getValue(valueId) !== prevValue) return;
+
+		// Since the node has reset the notification itself, we don't need the idle reset
+		this.clearNotificationIdleReset(valueId);
+		this.extendNotificationValueMetadata(
+			valueId,
+			notificationConfig,
+			valueConfig,
+		);
+		this.valueDB.setValue(valueId, 0 /* idle */);
+	}
+
 	/**
 	 * Handles the receipt of a Notification Report
 	 */
@@ -3349,25 +3555,6 @@ protocol version:      ${this.protocolVersion}`;
 			}
 			return;
 		}
-
-		// Fallback for V2 notifications that don't allow us to predefine the metadata during the interview.
-		// Instead of defining useless values for each possible notification event, we build the metadata on demand
-		const extendValueMetadata = (
-			valueId: ValueID,
-			notificationConfig: Notification,
-			valueConfig: NotificationValueDefinition & { type: "state" },
-		) => {
-			if (command.version === 2 || !this.valueDB.hasMetadata(valueId)) {
-				const metadata = getNotificationValueMetadata(
-					this.valueDB.getMetadata(valueId) as
-						| ValueMetadataNumeric
-						| undefined,
-					notificationConfig,
-					valueConfig,
-				);
-				this.valueDB.setMetadata(valueId, metadata);
-			}
-		};
 
 		// Look up the received notification in the config
 		const notificationConfig = this.driver.configManager.lookupNotification(
@@ -3385,22 +3572,11 @@ protocol version:      ${this.protocolVersion}`;
 
 			/** Returns a single notification state to idle */
 			const setStateIdle = (prevValue: number): void => {
-				const valueConfig = notificationConfig.lookupValue(prevValue);
-				// Only known variables may be reset to idle
-				if (!valueConfig || valueConfig.type !== "state") return;
-				// Some properties may not be reset to idle
-				if (!valueConfig.idle) return;
-
-				const variableName = valueConfig.variableName;
-				const valueId = NotificationCCValues.notificationVariable(
-					notificationName,
-					variableName,
-				).endpoint(command.endpointIndex);
-
-				// Since the node has reset the notification itself, we don't need the idle reset
-				this.clearNotificationIdleReset(valueId);
-				extendValueMetadata(valueId, notificationConfig, valueConfig);
-				this.valueDB.setValue(valueId, 0 /* idle */);
+				this.manuallyIdleNotificationValueInternal(
+					notificationConfig,
+					prevValue,
+					command.endpointIndex,
+				);
 			};
 
 			const value = command.notificationEvent!;
@@ -3488,7 +3664,11 @@ protocol version:      ${this.protocolVersion}`;
 					valueConfig.variableName,
 				).endpoint(command.endpointIndex);
 
-				extendValueMetadata(valueId, notificationConfig, valueConfig);
+				this.extendNotificationValueMetadata(
+					valueId,
+					notificationConfig,
+					valueConfig,
+				);
 			} else {
 				// Collect unknown values in an "unknown" bucket
 				const unknownValue =
@@ -3660,9 +3840,6 @@ protocol version:      ${this.protocolVersion}`;
 	}
 
 	private async handleTimeGet(command: TimeCCTimeGet): Promise<void> {
-		// treat this as a sign that the node is awake
-		this.markAsAwake();
-
 		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
 
 		const now = new Date();
@@ -3681,9 +3858,6 @@ protocol version:      ${this.protocolVersion}`;
 	}
 
 	private async handleDateGet(command: TimeCCDateGet): Promise<void> {
-		// treat this as a sign that the node is awake
-		this.markAsAwake();
-
 		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
 
 		const now = new Date();
@@ -3704,9 +3878,6 @@ protocol version:      ${this.protocolVersion}`;
 	private async handleTimeOffsetGet(
 		command: TimeCCTimeOffsetGet,
 	): Promise<void> {
-		// treat this as a sign that the node is awake
-		this.markAsAwake();
-
 		const endpoint = this.getEndpoint(command.endpointIndex) ?? this;
 
 		const timezone = getDSTInfo(new Date());
@@ -3770,7 +3941,7 @@ protocol version:      ${this.protocolVersion}`;
 
 		return {
 			firmwareUpgradable: true,
-			firmwareTargets: [0, ...additionalFirmwareIDs],
+			firmwareTargets: distinct([0, ...additionalFirmwareIDs]),
 			continuesToFunction,
 			supportsActivation,
 		};

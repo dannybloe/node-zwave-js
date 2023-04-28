@@ -647,6 +647,25 @@ export interface CreateValuelessReflectionDecoratorOptions {
     name: string;
 }
 
+// Warning: (ae-missing-release-tag) "CtrDRBG" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export class CtrDRBG {
+    constructor(bits: 128, derivation: boolean, entropy?: Buffer, nonce?: Buffer, pers?: Buffer);
+    // (undocumented)
+    derive(...input: Buffer[]): Buffer;
+    // (undocumented)
+    generate(len: number, add?: Buffer): Buffer;
+    // (undocumented)
+    init(entropy: Buffer, nonce?: Buffer, pers?: Buffer): this;
+    // (undocumented)
+    reseed(entropy: Buffer, add?: Buffer): this;
+    // (undocumented)
+    serialize(...input: Buffer[]): Buffer;
+    // (undocumented)
+    update(seed?: Buffer): this;
+}
+
 // Warning: (ae-missing-release-tag) "DataDirection" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
@@ -745,6 +764,8 @@ export interface DSTInfo {
 // @public
 export class Duration {
     constructor(value: number, unit: DurationUnit);
+    // (undocumented)
+    static default(): Duration;
     static from(input: "default"): Duration;
     // (undocumented)
     static from(input?: Duration | string): Duration | undefined;
@@ -761,6 +782,8 @@ export class Duration {
     toString(): string;
     // (undocumented)
     unit: DurationUnit;
+    // (undocumented)
+    static unknown(): Duration;
     // (undocumented)
     get value(): number;
     set value(v: number);
@@ -798,7 +821,7 @@ export function encodeApplicationNodeInformation(nif: ApplicationNodeInformation
 // Warning: (ae-missing-release-tag) "encodeBitMask" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public
-export function encodeBitMask(values: readonly number[], maxValue: number, startValue?: number): Buffer;
+export function encodeBitMask(values: readonly number[], maxValue?: number, startValue?: number): Buffer;
 
 // Warning: (ae-missing-release-tag) "encodeBoolean" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
@@ -1363,6 +1386,11 @@ export const MAX_TRANSPORT_SERVICE_SESSION_ID = 15;
 //
 // @public (undocumented)
 export type Maybe<T> = T | BrandedUnknown<T>;
+
+// Warning: (ae-missing-release-tag) "mergeSupervisionResults" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public
+export function mergeSupervisionResults(results: unknown[]): SupervisionResult | undefined;
 
 // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
 // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
@@ -2123,6 +2151,7 @@ export type SendCommandReturnType<TResponse extends ICommandClass | undefined> =
 //
 // @public (undocumented)
 export type SendCommandSecurityS2Options = {
+    s2VerifyDelivery?: boolean;
     s2MulticastOutOfSync?: boolean;
     s2MulticastGroupId?: number;
 };
@@ -3191,7 +3220,6 @@ export interface ZWaveLogInfo<TContext extends LogContext = LogContext> extends 
 
 // Warnings were encountered during analysis:
 //
-// src/security/Manager2.ts:65:4 - (ae-forgotten-export) The symbol "CtrDRBG" needs to be exported by the entry point index.d.ts
 // src/security/QR.ts:98:2 - (ae-unresolved-link) The @link reference could not be resolved: The package "@zwave-js/core" does not have an export "requestedSecurityClasses"
 
 // (No @packageDocumentation comment for this package)

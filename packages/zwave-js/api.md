@@ -116,10 +116,10 @@ import type { SecurityClass } from '@zwave-js/core/safe';
 import { SecurityClass as SecurityClass_2 } from '@zwave-js/core';
 import { SecurityClassOwner } from '@zwave-js/core';
 import { SendCommandOptions } from '@zwave-js/core';
-import { SendCommandOptions as SendCommandOptions_2 } from '@zwave-js/core/safe';
 import { SendCommandReturnType } from '@zwave-js/core';
 import { SendMessageOptions } from '@zwave-js/core';
 import { SensorType } from '@zwave-js/config';
+import type { SerialPort } from 'serialport';
 import { SetbackState } from '@zwave-js/cc';
 import { SetValueAPIOptions } from '@zwave-js/cc';
 import { SinglecastCC } from '@zwave-js/core';
@@ -155,6 +155,7 @@ import type { ZWaveHostOptions } from '@zwave-js/host';
 import { ZWaveLibraryTypes } from '@zwave-js/core/safe';
 import { ZWavePlusNodeType } from '@zwave-js/cc';
 import { ZWavePlusRoleType } from '@zwave-js/cc';
+import type { ZWaveSerialPortBase } from '@zwave-js/serial';
 import { ZWaveSerialPortImplementation } from '@zwave-js/serial';
 
 export { buffer2hex }
@@ -370,8 +371,9 @@ export class Driver extends TypedEventEmitter<DriverEventCallbacks> implements Z
     waitForCommand<T extends ICommandClass>(predicate: (cc: ICommandClass) => boolean, timeout: number): Promise<T>;
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
     // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
+    // Warning: (tsdoc-param-tag-missing-hyphen) The @param block should be followed by a parameter name and then a hyphen
     // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "waitForCommand"
-    waitForMessage<T extends Message>(predicate: (msg: Message) => boolean, timeout: number): Promise<T>;
+    waitForMessage<T extends Message>(predicate: (msg: Message) => boolean, timeout: number, refreshPredicate?: (msg: Message) => boolean): Promise<T>;
 }
 
 // Warning: (ae-missing-release-tag) "DriverLogContext" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -941,8 +943,7 @@ export class VirtualEndpoint implements IVirtualEndpoint {
     constructor(
     node: VirtualNode | undefined,
     driver: Driver,
-    index: number,
-    defaultCommandOptions?: SendCommandOptions_2 | undefined);
+    index: number);
     get commandClasses(): CCAPIs;
     protected readonly driver: Driver;
     getCCVersion(cc: CommandClasses): number;
@@ -963,8 +964,7 @@ export class VirtualEndpoint implements IVirtualEndpoint {
 // @public (undocumented)
 export class VirtualNode extends VirtualEndpoint implements IVirtualNode {
     constructor(id: number | undefined, driver: Driver,
-    physicalNodes: Iterable<ZWaveNode>,
-    defaultCommandOptions?: SendCommandOptions);
+    physicalNodes: Iterable<ZWaveNode>);
     getDefinedValueIDs(): VirtualValueID[];
     getEndpoint(index: 0): VirtualEndpoint;
     // (undocumented)
@@ -973,7 +973,11 @@ export class VirtualNode extends VirtualEndpoint implements IVirtualNode {
     // (undocumented)
     getEndpointOrThrow(index: number): VirtualEndpoint;
     // (undocumented)
+    get hasMixedSecurityClasses(): boolean;
+    // (undocumented)
     readonly id: number | undefined;
+    // (undocumented)
+    readonly nodesBySecurityClass: ReadonlyMap<SecurityClass_2, readonly ZWaveNode[]>;
     // (undocumented)
     readonly physicalNodes: readonly ZWaveNode[];
     setValue(valueId: ValueID_2, value: unknown, options?: SetValueAPIOptions): Promise<boolean>;
@@ -1062,19 +1066,28 @@ export class ZWaveController extends TypedEventEmitter<ControllerEventCallbacks>
         rssiChannel1: RSSI_2;
         rssiChannel2?: RSSI_2;
     }>;
-    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getBroadcastNodes"
-    //
-    // @deprecated
     getBroadcastNode(): VirtualNode;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getBroadcastNode"
+    //
+    // @deprecated (undocumented)
     getBroadcastNodeInsecure(): VirtualNode;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getBroadcastNode"
+    //
+    // @deprecated (undocumented)
     getBroadcastNodes(): VirtualNode[];
     getKnownLifelineRoutes(): ReadonlyMap<number, LifelineRoutes>;
-    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getMulticastGroups"
+    getMulticastGroup(nodeIDs: number[]): VirtualNode;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getMulticastGroup"
     //
     // @deprecated
-    getMulticastGroup(nodeIDs: number[]): VirtualNode;
     getMulticastGroupInsecure(nodeIDs: number[]): VirtualNode;
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getMulticastGroup"
+    //
+    // @deprecated (undocumented)
     getMulticastGroups(nodeIDs: number[]): VirtualNode[];
+    // Warning: (ae-unresolved-link) The @link reference could not be resolved: The package "zwave-js" does not have an export "getMulticastGroup"
+    //
+    // @deprecated
     getMulticastGroupS2(nodeIDs: number[]): VirtualNode;
     getNodeByDSK(dsk: Buffer | string): ZWaveNode | undefined;
     getNodeNeighbors(nodeId: number, onlyRepeaters?: boolean): Promise<readonly number[]>;
@@ -1281,6 +1294,9 @@ export class ZWaveNode extends Endpoint implements SecurityClassOwner, IZWaveNod
     protected loadDeviceConfig(): Promise<void>;
     get location(): string | undefined;
     set location(value: string | undefined);
+    manuallyIdleNotificationValue(valueId: ValueID_2): void;
+    // (undocumented)
+    manuallyIdleNotificationValue(notificationType: number, prevValue: number, endpointIndex?: number): void;
     // (undocumented)
     get manufacturerId(): number | undefined;
     // (undocumented)
@@ -1574,6 +1590,14 @@ export interface ZWaveOptions extends ZWaveHostOptions {
         lockDir?: string;
         deviceConfigPriorityDir?: string;
         throttle: "fast" | "normal" | "slow";
+    };
+    testingHooks?: {
+        serialPortBinding?: typeof SerialPort;
+        onSerialPortOpen?: (port: ZWaveSerialPortBase) => Promise<void>;
+        skipControllerIdentification?: boolean;
+        skipNodeInterview?: boolean;
+        skipBootloaderCheck?: boolean;
+        loadConfiguration?: boolean;
     };
     timeouts: {
         ack: number;
